@@ -1,0 +1,279 @@
+---
+title: "Soccer Regression Project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# We are going to start out with some EDA
+
+I started by narrowing down the dataset to quantitative, per-game variables to prevent bias in the number of games a team played during the season.
+```{r}
+library(tidyverse)
+
+soccer_qunant <- womens_ncaa_soccer_20182019 %>% 
+  select(team,
+         team_games,
+         assists_gp,
+         fouls_gp,
+         points_gp,
+         save_pct,
+         saves_gp,
+         gpg,
+         sog_pct,
+         win_pct,
+         sog_gp,
+         season)
+```
+
+Constructing a correlation matrix of relevant per-game variables to determine the strength of relationships between the variables in the dataset.
+```{r}
+
+soccer_qunant %>% 
+  select(assists_gp,
+         fouls_gp,
+         pk_pct,
+         points_gp,
+         save_pct,
+         saves_gp,
+         gpg,
+         sog_pct,
+         win_pct,
+         sog_gp) %>% 
+  cor()
+```
+
+In this matrix I can explore which variables are strongly related and which might not be as relevant to my regression.
+
+Looking at pairs plots for some strongly related variables.
+```{r}
+womens_ncaa_soccer_20182019 %>% 
+  select(win_pct, 
+         points_gp,
+         shots_gp,
+         saves_gp) %>% 
+  pairs()
+
+```
+All of these variables look to be linearly related to one another, with varying levels of strength.
+
+Exploring scatterplots of certain variables with win percent.
+```{r}
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x  = points_gp,
+             y = win_pct)) +
+  geom_point()
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x  = shots_gp,
+             y = win_pct)) +
+  geom_point()
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x  = saves_gp,
+             y = win_pct)) +
+  geom_point()
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x  = assists_gp,
+             y = win_pct)) +
+  geom_point()
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x  = fouls_gp,
+             y = win_pct)) +
+  geom_point()
+
+plot(assists_gp ~ points_gp, 
+     data = womens_ncaa_soccer_20182019)
+
+plot(corners_gp~assists_gp, 
+     data = womens_ncaa_soccer_20182019)
+
+```
+It looks like points per game, shots per game, and assists per game have a pretty strong linear relationship with win percent. Saves per game has a moderate linear relationship with win percent. Fouls per game does not appear to have any sort of relevant relationship with win percent. Assists per game and points per game are clearly very strongly correlated. Corners per game and assists per game seem to have a weak relationship.
+
+
+Exploring the effect of season
+```{r}
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x = pk_pct,
+             y = win_pct,
+             color = as.factor(season))) +
+  geom_point()
+```
+There does not appear to be a difference between the seasons in the relationships between penalty kick percentage and win percent.
+
+
+Looking at the distributions of some variables that were having interesting effects.
+```{r}
+hist(womens_ncaa_soccer_20182019$fouls)
+
+hist(womens_ncaa_soccer_20182019$psatt)
+```
+Fouls appears to be pretty normally distributed, while penalty shot attempts is right skewed with many teams having zero penalty kick attempts.
+
+# Starting to fit a potential regression
+
+I started by including the per-game predictors that had a correlation of more than 0.7 or less than -0.7 with win percent.
+```{r}
+init_fit <- lm(win_pct ~ assists_gp + gaa + 
+                 points_gp + gpg + shots_gp + 
+                 sog_gp,
+               data = womens_ncaa_soccer_20182019)
+summary(init_fit)
+```
+With this initial model, we can see that coefficient estimates are very small and many p-values are very high.
+
+
+I plotted the residuals against some of the predictor variables to try and determine if there were clear interactions among these variables that need to be accounted for in the model.
+```{r}
+plot(init_fit$residuals~
+       womens_ncaa_soccer_20182019$assists_gp, 
+     color = womens_ncaa_soccer_20182019$season)
+plot(init_fit$residuals~
+       womens_ncaa_soccer_20182019$points_gp)
+plot(init_fit$residuals~
+       womens_ncaa_soccer_20182019$sog_gp)
+plot(init_fit$residuals~
+       womens_ncaa_soccer_20182019$shots_gp)
+```
+None of these plots show evidence of an interaction being necessary. There do seem to be some outliers, but the strong majority of the data is randomly scattered.
+
+I began to narrow my model by removing the predictor with the highest p-value
+```{r}
+second_fit <- lm(win_pct ~ assists_gp + gaa + 
+                   points_gp + shots_gp + sog_gp,
+               data = womens_ncaa_soccer_20182019)
+summary(second_fit)
+```
+
+I again removed the variable with the highest p-value from the model.
+```{r}
+third_fit <- lm(win_pct ~ assists_gp + gaa + 
+                  points_gp + sog_gp,
+                 data = womens_ncaa_soccer_20182019)
+summary(third_fit)
+```
+
+After talking with Caleb, I took the variable about goals against out of the model because it is a very obvious predictor of win percent.
+```{r}
+fourth_fit <- lm(win_pct ~ assists_gp + points_gp +
+                   sog_gp,
+                 data = womens_ncaa_soccer_20182019)
+summary(fourth_fit)
+```
+Removing goals against caused a large drop in the Mutiple R-Squared for the model and caused the assists per game variable to lose its significance.
+
+Looking at some residuals by variable from this fourth fit.
+```{r}
+plot(fourth_fit$residuals~
+       womens_ncaa_soccer_20182019$assists_gp)
+plot(fourth_fit$residuals~
+       womens_ncaa_soccer_20182019$points_gp)
+plot(fourth_fit$residuals~
+       womens_ncaa_soccer_20182019$sog_gp)
+```
+We are seeing again that there is no clear evidence that an interaction is necessary for this model.
+
+Even though the residual plots did not indicate presence of an interaction, I wanted to explore the reactions that may be present
+```{r}
+experimental_fit <- lm(win_pct ~ assists_gp + 
+                         points_gp + sog_gp + 
+                         assists_gp * points_gp,
+                 data = womens_ncaa_soccer_20182019)
+summary(experimental_fit)
+plot(experimental_fit)
+```
+The interaction term between assists per game and points per game has a very small p-value. The residual plots for this model look very good.
+
+Exploring a full interaction model to see if other interactions may be significant.
+```{r}
+interaction_fit <- lm(win_pct ~
+                      assists_gp*points_gp*sog_gp, 
+                      data = womens_ncaa_soccer_20182019)
+summary(interaction_fit)
+```
+Some of the interactions between variables did have significance, but they did not contribute to the model as  a whole very much and they could be accounting for too much random noise in the data.
+
+
+# Testing models
+
+I'm setting up training and testing sets for my model. We are using 2018 data as the training set and 2019 for the testing set. This is logical because the 2018 data could have been useful before the 2019 season to predict.
+```{r}
+womens_ncaa_soccer_2018 <- womens_ncaa_soccer_20182019 %>% 
+  filter(season == 2018)
+
+womens_ncaa_soccer_2019 <- womens_ncaa_soccer_20182019 %>% 
+  filter(season == 2019)
+```
+
+I'm fitting two candidate models on the 2018 season data
+```{r}
+candidate_model_1 <- lm(win_pct ~ assists_gp + points_gp +
+                          sog_gp,
+                data = womens_ncaa_soccer_2018)
+summary(candidate_model_1)
+plot(candidate_model_1)
+
+candidate_model_2 <- lm(win_pct ~ assists_gp + points_gp +
+                          sog_gp + points_gp * assists_gp,
+                        data = womens_ncaa_soccer_2018)
+summary(candidate_model_2)
+plot(candidate_model_2)
+```
+
+Calculating the MSE for the candidate models.
+```{r}
+model_1_preds <- predict(candidate_model_1, 
+                         newdata = womens_ncaa_soccer_2019)
+model_1_mse <- mean((model_1_preds -
+                       womens_ncaa_soccer_2019$win_pct)^2)
+model_1_mse
+
+model_2_preds <- predict(candidate_model_2,
+                         newdata = womens_ncaa_soccer_2019)
+model_2_mse <- mean((model_2_preds - 
+                       womens_ncaa_soccer_2019$win_pct)^2)
+model_2_mse
+
+```
+The MSE for candidate model 2 (with the interaction included) has a slightly smaller MSE of the two models. Because win percent has values between 0 and 1, these small values do not necessarily indicate an incredibly strong predictive value. The MSE needs to be compared among models.
+
+# Rethinking things with Caleb
+
+Over the weekend Caleb and I worked independently of one another to work with the data and begin fitting regression models. Caleb mutated the dataset to make a new variable, goal differential.
+```{r}
+womens_ncaa_soccer_20182019 <- 
+  womens_ncaa_soccer_20182019 %>% 
+  mutate(goal_diff = goals - ga)
+```
+This variable has units that are more easily interpretable, and it is very highly correlated with win percent. It encompasses multiple columns of data as well.
+
+This is the model that Caleb came to over the weekend. I think using corners per game as a predictor could be a problem because it is missing from 2018 data so we wouldn't be able to calculate the MSe between 2018 and 2019. However, from a practical standpoint, we can expect that future season data would include corner data so it would be useful in the future.
+```{r}
+caleb_fit <- lm(goal_diff ~ corners_gp + save_pct + 
+                  pk_pct + assists_gp + sog_gp,
+                data = womens_ncaa_soccer_20182019)
+summary(caleb_fit)
+plot(caleb_fit)
+```
+In the residual plots, we can see that this model is a pretty great fit but there are a few outliers that are strongly influencing the data.
+
+We tried removing the two datapoints that were consistent outliers in the model from the dataset to see what happened.
+```{r}
+nooutlier <- womens_ncaa_soccer_20182019 %>% 
+  filter(team != "Alcorn") %>% 
+  filter(team != "Chicago St.")
+nooutlierfit <- lm(goal_diff ~ corners_gp + save_pct +
+                     pk_pct + assists_gp + sog_gp,
+                   data = nooutlier)
+summary(nooutlierfit)
+plot(nooutlierfit)
+```
+Removing these outliers only changes the model very slightly, but the residual plots are more ideal. Both of these teams had a win percent of zero, and there are two other teams also with a win percent of zero. Arbitrarily cutting out data is obviously not ideal, but could there be justification for removing all the teams that had a win percent of zero?
+
+
+
