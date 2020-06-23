@@ -142,7 +142,7 @@ plot(init_fit$residuals~
 ```
 None of these plots show evidence of an interaction being necessary. There do seem to be some outliers, but the strong majority of the data is randomly scattered.
 
-I began to narrow my model by removing the predictor with the highest p-value
+I began to narrow my model by removing the predictor with the highest p-value. After Monday's lecture, I realize that the model building method I used is very formulaic and doesn't create the best possible fit for the data. 
 ```{r}
 second_fit <- lm(win_pct ~ assists_gp + gaa + 
                    points_gp + shots_gp + sog_gp,
@@ -252,6 +252,90 @@ womens_ncaa_soccer_20182019 <-
 ```
 This variable has units that are more easily interpretable, and it is very highly correlated with win percent. It encompasses multiple columns of data as well.
 
+#Doing some EDA with goal differential
+
+Exploring the distribution of goal differential
+```{r}
+library(rvest)
+
+soccer_rankings <- read_html("https://www.ncaa.com/rankings/soccer-women/d1/ncaa-womens-soccer-rpi") %>% 
+  html_table()
+
+school_conf <- soccer_rankings[[1]] %>% 
+  select("School", "Conference")
+
+womens_ncaa_soccer_20182019 <- 
+  womens_ncaa_soccer_20182019 %>% 
+  left_join(school_conf, by = c("team" = "School"))
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x = goal_diff)) +
+  geom_histogram(binwidth = 10, color = "black")
+```
+We can see that goal differential is pretty normally distributed
+
+Exploring goal ratio as a possible predictor?
+```{r}
+womens_ncaa_soccer_20182019 <- 
+  womens_ncaa_soccer_20182019 %>% 
+  mutate(goal_ratio = goals / ga)
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x = team_games,
+             y = goal_ratio)) +
+  geom_point()
+```
+Very confusing interpretation and still has a relationship with number of games played.
+
+I'm looking at scatterplots and correlation values for goal differential and several per-game predictor variables.
+```{r}
+womens_ncaa_soccer_20182019 %>% 
+  select(goal_diff, assists_gp, save_pct, corners_gp,
+         fouls_gp, pk_pct, sog_gp) %>% 
+  pairs()
+
+womens_ncaa_soccer_20182019 %>% 
+  select(goal_diff, assists_gp, save_pct, corners_gp,
+         fouls_gp, pk_pct, sog_gp) %>% 
+  cor()
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x = assists_gp,
+             y = goal_diff)) + 
+  geom_point()
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x = save_pct,
+             y = goal_diff)) + 
+  geom_point()
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x = corners_gp,
+             y = goal_diff)) + 
+  geom_point()
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x = fouls_gp,
+             y = goal_diff)) + 
+  geom_point()
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x = pk_pct,
+             y = goal_diff)) + 
+  geom_point()
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x = sog_gp,
+             y = goal_diff)) + 
+  geom_point()
+```
+
+
+
+
+
+#Models with goal differential as the response
+
 This is the model that Caleb came to over the weekend. I think using corners per game as a predictor could be a problem because it is missing from 2018 data so we wouldn't be able to calculate the MSe between 2018 and 2019. However, from a practical standpoint, we can expect that future season data would include corner data so it would be useful in the future.
 ```{r}
 caleb_fit <- lm(goal_diff ~ corners_gp + save_pct + 
@@ -275,5 +359,71 @@ plot(nooutlierfit)
 ```
 Removing these outliers only changes the model very slightly, but the residual plots are more ideal. Both of these teams had a win percent of zero, and there are two other teams also with a win percent of zero. Arbitrarily cutting out data is obviously not ideal, but could there be justification for removing all the teams that had a win percent of zero?
 
+
+#Testing data for goal differential model without corners
+
+```{r}
+
+candidate_model_3 <- lm(goal_diff ~ assists_gp + points_gp +
+                          sog_gp,
+                data = womens_ncaa_soccer_2018)
+summary(candidate_model_3)
+
+candidate_model_4 <- lm(goal_diff ~ assists_gp + points_gp +
+                          sog_gp + points_gp * assists_gp,
+                        data = womens_ncaa_soccer_2018)
+summary(candidate_model_4)
+
+candidate_model_5 <- lm(goal_diff ~ save_pct + 
+                  pk_pct + assists_gp + sog_gp,
+                data = womens_ncaa_soccer_2018)
+summary(candidate_model_5)
+
+```
+Model 5 has a stronger multiple R-squared value.
+
+Calculating MSE for potential models with goal differential as response using 2019 season data as testing data.
+```{r}
+model_3_preds <- predict(candidate_model_3, 
+                         newdata = womens_ncaa_soccer_2019)
+model_3_mse <- mean((model_3_preds -
+                       womens_ncaa_soccer_2019$goal_diff)^2)
+model_3_mse
+
+model_4_preds <- predict(candidate_model_4,
+                         newdata = womens_ncaa_soccer_2019)
+model_4_mse <- mean((model_4_preds - 
+                       womens_ncaa_soccer_2019$goal_diff)^2)
+model_4_mse
+
+model_5_preds <- predict(candidate_model_5,
+                         newdata = womens_ncaa_soccer_2019)
+model_5_mse <- mean((model_5_preds - 
+                       womens_ncaa_soccer_2019$goal_diff)^2)
+model_5_mse
+
+```
+We can see that model 5 provides the best fit by quite a large margin.
+
+I want to plot the two years data in side by side scatterplots with lines using the models with and without corners.
+```{r}
+model_1819 <- lm(goal_diff ~ save_pct + 
+                  pk_pct + assists_gp + sog_gp,
+                data = womens_ncaa_soccer_20182019)
+model_19corners <- lm(goal_diff ~ corners_gp + save_pct + 
+                  pk_pct + assists_gp + sog_gp,
+                data = womens_ncaa_soccer_20182019)
+preds_1819 <- predict(model_1819)
+preds_19corners <- predict(model_19corners)
+
+womens_ncaa_soccer_20182019 %>% 
+  filter(season == 2018) %>% 
+  ggplot(aes(x = preds_1819)) +
+  geom_point(aes(y = goal_diff)) +
+  geom_line(aes(y = preds_1819)) 
+
+
+
+```
 
 
