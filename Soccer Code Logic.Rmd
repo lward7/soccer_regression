@@ -14,25 +14,11 @@ I started by narrowing down the dataset to quantitative, per-game variables to p
 library(tidyverse)
 
 soccer_qunant <- womens_ncaa_soccer_20182019 %>% 
+    mutate(goal_diff = goals - ga) %>% 
   select(team,
          team_games,
+         corners_gp,
          assists_gp,
-         fouls_gp,
-         points_gp,
-         save_pct,
-         saves_gp,
-         gpg,
-         sog_pct,
-         win_pct,
-         sog_gp,
-         season)
-```
-
-Constructing a correlation matrix of relevant per-game variables to determine the strength of relationships between the variables in the dataset.
-```{r}
-
-soccer_qunant %>% 
-  select(assists_gp,
          fouls_gp,
          pk_pct,
          points_gp,
@@ -41,9 +27,34 @@ soccer_qunant %>%
          gpg,
          sog_pct,
          win_pct,
+         sog_gp,
+         goal_diff,
+         season)
+```
+
+Constructing a correlation matrix of relevant per-game variables to determine the strength of relationships between the variables in the dataset.
+```{r}
+
+install.packages("gt")
+library(gt)
+install.packages("xtable")
+library(xtable)
+
+corr_table <- soccer_qunant %>%
+  select(goal_diff,
+         fouls_gp,
+         pk_pct,
+         save_pct,
+         saves_gp,
+         corners_gp,
+         sog_pct,
          sog_gp) %>% 
   cor()
+corr_table <- round(corr_table, 2)
+corr_table[upper.tri(corr_table)] <- ""
+print(xtable(corr_table), type = "html")
 ```
+
 
 In this matrix I can explore which variables are strongly related and which might not be as relevant to my regression.
 
@@ -61,36 +72,78 @@ All of these variables look to be linearly related to one another, with varying 
 
 Exploring scatterplots of certain variables with win percent.
 ```{r}
-womens_ncaa_soccer_20182019 %>% 
-  ggplot(aes(x  = points_gp,
-             y = win_pct)) +
-  geom_point()
+womens_ncaa_soccer_20182019 <- 
+  womens_ncaa_soccer_20182019 %>% 
+  mutate(goal_diff = goals - ga)
 
-womens_ncaa_soccer_20182019 %>% 
-  ggplot(aes(x  = shots_gp,
-             y = win_pct)) +
-  geom_point()
+install.packages("ggpubr")
+library(ggpubr)
 
 womens_ncaa_soccer_20182019 %>% 
   ggplot(aes(x  = saves_gp,
-             y = win_pct)) +
-  geom_point()
-
-womens_ncaa_soccer_20182019 %>% 
-  ggplot(aes(x  = assists_gp,
-             y = win_pct)) +
-  geom_point()
+             y = goal_diff)) +
+  geom_point() +
+    theme_bw() +
+  labs(title = "Goal Differential and Saves Per Game",
+       subtitle = "Women's NCAA Soccer 2018 & 2019",
+       x = "Saves Per Game",
+       y = "Season Goal Differential") +
+  stat_cor(method = "pearson",
+           label.x = 6,
+           label.y = 60)
 
 womens_ncaa_soccer_20182019 %>% 
   ggplot(aes(x  = fouls_gp,
-             y = win_pct)) +
-  geom_point()
+             y = goal_diff)) +
+  geom_point() + 
+    theme_bw() +
+  labs(title = "Goal Differential and Fouls Per Game",
+       subtitle = "Women's NCAA Soccer 2018 & 2019",
+       x = "Fouls Per Game",
+       y = "Season Goal Differential") +
+  stat_cor(method = "pearson",
+           label.x = 10,
+           label.y = 70)
 
-plot(assists_gp ~ points_gp, 
-     data = womens_ncaa_soccer_20182019)
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x  = corners_gp,
+             y = goal_diff)) +
+  geom_point() + 
+    theme_bw() +
+  labs(title = "Goal Differential and Corners Per Game",
+       subtitle = "Women's NCAA Soccer 2019",
+       x = "Corners Per Game",
+       y = "Season Goal Differential",
+       caption = "corner data only available only for 2019 season") +
+  stat_cor(method = "pearson",
+           label.x = 4.5,
+           label.y = -60)
 
-plot(corners_gp~assists_gp, 
-     data = womens_ncaa_soccer_20182019)
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x  = pk_pct,
+             y = goal_diff)) +
+  geom_jitter(height = 0) + 
+    theme_bw() +
+  labs(title = "Goal Differential and Penalty Kick Percentage",
+       subtitle = "Women's NCAA Soccer 2018 & 2019",
+       x = "Penalty Kick Percentage",
+       y = "Season Goal Differential") +
+  stat_cor(method = "pearson",
+           label.x = 0,
+           label.y = 70)
+
+womens_ncaa_soccer_20182019 %>% 
+  ggplot(aes(x  = save_pct,
+             y = goal_diff)) +
+  geom_point() + 
+    theme_bw() +
+  labs(title = "Goal Differential and Save Percentage",
+       subtitle = "Women's NCAA Soccer 2018 & 2019",
+       x = "Save Percentage",
+       y = "Season Goal Differential") +
+  stat_cor(method = "pearson",
+           label.x = 0.75,
+           label.y = -60)
 
 ```
 It looks like points per game, shots per game, and assists per game have a pretty strong linear relationship with win percent. Saves per game has a moderate linear relationship with win percent. Fouls per game does not appear to have any sort of relevant relationship with win percent. Assists per game and points per game are clearly very strongly correlated. Corners per game and assists per game seem to have a weak relationship.
@@ -270,7 +323,14 @@ womens_ncaa_soccer_20182019 <-
 
 womens_ncaa_soccer_20182019 %>% 
   ggplot(aes(x = goal_diff)) +
-  geom_histogram(binwidth = 10, color = "black")
+  geom_histogram(binwidth = 10, 
+                 color = "black",
+                 fill = "#CC002B") +
+  theme_bw() +
+  labs(title = "Season Goal Differential",
+       subtitle = "Women's NCAA Soccer 2018 & 2019",
+       x = "Goal Differential",
+       y = "count")
 ```
 We can see that goal differential is pretty normally distributed
 
@@ -374,11 +434,14 @@ candidate_model_4 <- lm(goal_diff ~ assists_gp + points_gp +
                         data = womens_ncaa_soccer_2018)
 summary(candidate_model_4)
 
+                         
+
 candidate_model_5 <- lm(goal_diff ~ save_pct + 
-                  pk_pct + assists_gp + sog_gp,
+                  pk_pct  + sog_gp + saves_gp + fouls_gp,
                 data = womens_ncaa_soccer_2018)
 summary(candidate_model_5)
 
+plot(candidate_model_5)
 ```
 Model 5 has a stronger multiple R-squared value.
 
@@ -413,17 +476,240 @@ model_1819 <- lm(goal_diff ~ save_pct +
 model_19corners <- lm(goal_diff ~ corners_gp + save_pct + 
                   pk_pct + assists_gp + sog_gp,
                 data = womens_ncaa_soccer_20182019)
-preds_1819 <- predict(model_1819)
-preds_19corners <- predict(model_19corners)
+preds_1819_18 <- predict(model_1819, womens_ncaa_soccer_2018)
+preds_1819_19 <- predict(model_1819,
+                         womens_ncaa_soccer_2019)
+preds_19corners <- predict(model_19corners, womens_ncaa_soccer_2019)
 
 womens_ncaa_soccer_20182019 %>% 
   filter(season == 2018) %>% 
-  ggplot(aes(x = preds_1819)) +
-  geom_point(aes(y = goal_diff)) +
-  geom_line(aes(y = preds_1819)) 
+  ggplot() +
+  geom_point(aes(x = assists_gp, y = goal_diff)) +
+  geom_smooth(aes(x = assists_gp, y = preds_1819_18)) 
+
+womens_ncaa_soccer_20182019 %>% 
+  filter(season == 2019) %>% 
+  ggplot() +
+  geom_point(aes(x = assists_gp, y = goal_diff)) +
+  geom_smooth(aes(x = assists_gp, y = preds_1819_19)) +
+  geom_smooth(aes(x = assists_gp, y = preds_19corners), color = "red")
 
 
 
 ```
+
+#cross validation looking at corners for 2019 data
+
+Starting by generating two subsets of the 2019 data
+```{r}
+n_teams <- nrow(womens_ncaa_soccer_2019)
+
+train_nums <- sample(n_teams, 
+                     n_teams / 2, 
+                     replace = FALSE)
+
+test_nums <- (1:n_teams)[-train_nums]
+
+train_2019 <- womens_ncaa_soccer_2019[train_nums,]
+
+test_2019 <- womens_ncaa_soccer_2019[test_nums,]
+```
+
+Setting up candidate models
+```{r}
+candidate_model_2019_1 <- lm(goal_diff ~ assists_gp +
+                               points_gp +
+                               sog_gp,
+                             data = train_2019)
+
+candidate_model_2019_2 <- lm(goal_diff ~ assists_gp +
+                               points_gp +
+                               sog_gp + 
+                               points_gp * assists_gp,
+                             data = train_2019)
+
+candidate_model_2019_3 <- lm(goal_diff ~ save_pct + 
+                               pk_pct + assists_gp +
+                               sog_gp,
+                             data = train_2019)
+
+candidate_model_2019_4 <- lm(goal_diff ~ save_pct + 
+                               pk_pct + assists_gp +
+                               sog_gp + corners_gp,
+                             data = train_2019)
+summary(candidate_model_2019_4)
+
+candidate_model_2019_32 <- lm(goal_diff ~ save_pct + 
+                               pk_pct + sog_pct  + saves_gp + fouls_gp +
+                               sog_gp,
+                             data = train_2019)
+
+candidate_model_2019_42 <- lm(goal_diff ~ save_pct + 
+                               pk_pct + sog_pct  + saves_gp + fouls_gp +
+                               sog_gp + corners_gp,
+                             data = train_2019)
+
+model_5 <- lm(goal_diff ~ save_pct + pk_pct + assists_gp +
+                sog_gp + corners_gp, 
+              data = womens_ncaa_soccer_2019)
+summary(model_5)
+
+womens_ncaa_soccer_20182019 <- womens_ncaa_soccer_20182019 %>% 
+  mutate(save_pct100 = save_pct * 100) %>% 
+  mutate(pk_pct100 = pk_pct * 100)
+
+
+womens_ncaa_soccer_2019 <- womens_ncaa_soccer_2019 %>% 
+  mutate(save_pct100 = save_pct *100) %>% 
+  mutate(pk_pct100 = pk_pct * 100)
+
+final_model2019 <- lm(goal_diff~ pk_pct100 + save_pct100 + saves_gp + fouls_gp +
+                    sog_gp + corners_gp, data = womens_ncaa_soccer_2019)
+summary(final_model2019)
+
+final_model <- lm(goal_diff~ pk_pct100 + save_pct100 + saves_gp + fouls_gp +
+                    sog_gp, data = womens_ncaa_soccer_20182019)
+summary(final_model)
+install.packages("GGally")
+library(GGally)
+
+ggcoef(final_model2019,
+       exclude_intercept = TRUE,
+       vline = TRUE,
+       vline_color = "red") +
+  theme_bw() +
+  labs(title = "Coefficient Estimates",
+       subtitle = "Women's NCAA Soccer 2019",
+       caption = "corner data only available for 2019 season
+       Adjusted R-Squared = 0.8754
+       rMSE from five-fold Cross-Validation = 6.87",
+       x = "Estimate",
+       y = "Covariate")
+
+ggcoef(final_model,
+       exclude_intercept = TRUE,
+       vline = TRUE,
+       vline_color = "red") +
+  theme_bw() +
+  labs(title = "Coefficient Estimates",
+       subtitle = "Women's NCAA Soccer 2018 & 2019",
+       caption = "Adjusted R-Squared = 0.8824,
+       rMSE with 2018 as Training and 2019 as Testing = 7.07",
+       x = "Estimate",
+       y = "Covariate")
+
+```
+
+Calculating MSE
+```{r}
+model_2019_1_preds <- predict(candidate_model_2019_1,
+                              newdata = test_2019)
+model_2019_1_mse <- mean((model_2019_1_preds - 
+                            test_2019$goal_diff)^2)
+
+model_2019_2_preds <- predict(candidate_model_2019_2,
+                              newdata = test_2019)
+model_2019_2_mse <- mean((model_2019_2_preds - 
+                            test_2019$goal_diff)^2)
+
+model_2019_3_preds <- predict(candidate_model_2019_3,
+                              newdata = test_2019)
+model_2019_3_mse <- mean((model_2019_3_preds - 
+                            test_2019$goal_diff)^2)
+
+model_2019_4_preds <- predict(candidate_model_2019_4,
+                              newdata = test_2019)
+model_2019_4_mse <- mean((model_2019_4_preds - 
+                            test_2019$goal_diff)^2)
+
+model_2019_32_preds <- predict(candidate_model_2019_32,
+                              newdata = test_2019)
+model_2019_32_mse <- mean((model_2019_32_preds - 
+                            test_2019$goal_diff)^2)
+
+model_2019_42_preds <- predict(candidate_model_2019_42,
+                              newdata = test_2019)
+model_2019_42_mse <- mean((model_2019_42_preds - 
+                            test_2019$goal_diff)^2)
+
+model_2019_1_mse
+model_2019_2_mse
+model_2019_3_mse
+model_2019_4_mse
+
+model_2019_32_mse
+model_2019_42_mse
+
+summary(candidate_model_2019_42)
+
+plot(candidate_model_2019_42)
+womens_ncaa_soccer_2019 <- womens_ncaa_soccer_2019 %>% 
+  mutate(save_pct100 = save_pct *100)
+candidate_model_422 <- lm(goal_diff ~  
+                               pk_pct + sog_pct + save_pct100 + saves_gp + fouls_gp +
+                               sog_gp + corners_gp,
+                          data = womens_ncaa_soccer_2019)
+summary(candidate_model_422)
+
+sqrt(model_2019_32_mse)
+sqrt(model_2019_42_mse)
+
+confint(candidate_model_422)
+```
+
+```{r}
+womens_ncaa_soccer_2018 <- 
+  womens_ncaa_soccer_2018 %>% 
+  mutate(save_pct100 = save_pct * 100)
+
+final_model <- lm(goal_diff~ pk_pct + save_pct100 + saves_gp + fouls_gp +
+                    sog_gp, data = womens_ncaa_soccer_2018)
+summary(final_model)
+final_model_preds <- predict(final_model, newdata = womens_ncaa_soccer_2019)
+final_model_mse <- mean((final_model_preds - womens_ncaa_soccer_2019$goal_diff)^2)
+
+final_model_mse
+sqrt(final_model_mse)
+```
+
+
+
+```{r}
+library(ggdendro)
+
+soccer_correlation <- 
+  womens_ncaa_soccer_20182019 %>% 
+  na.omit() %>% 
+  select(!"X") %>% 
+  select(!"X1") %>% 
+  select(!"save_pct100") %>% 
+  select(!"goal_ratio") %>% 
+  select_if(is.numeric) %>%
+  cor()
+
+soccer_distribution <- 1-abs(soccer_correlation)
+
+soccer_distribution %>% 
+  as.dist() %>% 
+  hclust(method = "complete") %>% 
+  as.dendrogram() %>% 
+  ggdendro::ggdendrogram(rotate = T) +
+  labs(title = "Clustering with Complete Linkage",
+       subtitle = "Women's NCAA Soccer 2018 & 2019")
+```
+
+```{r}
+n_distinct(womens_ncaa_soccer_20182019$team)
+summary(womens_ncaa_soccer_20182019$team_games)
+hist(womens_ncaa_soccer_20182019$team_games)
+
+dim(womens_ncaa_soccer_20182019)
+```
+
+
+
+
+
+
 
 

@@ -170,3 +170,5 @@ plot(nooutlierfit)
 
 
 caleb_fit$fitted.values
+
+print(xtable(corr_table), type = "")
