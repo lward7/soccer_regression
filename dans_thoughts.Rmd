@@ -79,16 +79,139 @@ proc_data <- base_data %>%
   select(features) %>% 
   mutate(index = row_number())
 
-# remove a portion as a test set
-proc_data_test <- proc_data %>% 
-  sample_frac(.2)
 
-proc_data_train <- proc_data %>% 
-  filter(!(index %in% proc_data_test$index))
+# split into train/test
+
+# Have to do it myself :p
+
+# create a uniform distribution betwee 0 and 1, length is the size of the data,
+# then if it is below a given threshold make it train or test
+test_frac = 0.2
+split_index <- ifelse(runif(nrow(proc_data)) > test_frac, "train", "test")
+
+# split it on this
+proc_data_split <- proc_data %>% 
+  split(split_index)
+
+data_train <- proc_data_split$train
+data_test <- proc_data_split$test
 
 ```
 
-### do k-fold cross-validation manually
+### do k-fold cross-validation on this data
+We're going to use some advanced `tidyverse` code to keep it very organized
 ```{r}
-fit_model
+# set the k
+k <- 20
+
+# make the above splitting code a function so we can use it MANY times 
+split_train_valid <- function(.df, .frac) {
+  split_index <- ifelse(runif(nrow(.df)) > .frac, "train", "valid")
+  .df %>% 
+    split(split_index)
+  }
+
+# now we use functions from Hadley's purrr package to apply this function
+# to the data k times generating unique train/validate sets
+cross_val_data <- crossing(data = list(data_train), k = 1:k) %>% 
+  mutate(data_split = map(data, split_train_valid, .2),
+         data_train = map(data_split, ~ .$train),
+         data_valid = map(data_split, ~ .$valid)) %>% 
+  select(k, data_train, data_valid)
+  
+cross_val_data
+
+```
+
+### fit the model k times, make predictions
+```{r}
+# fit the model for every row, then turn around and make predictions
+cross_val_preds <- cross_val_data %>% 
+  mutate(model = map(data_train, ranger, formula = goal_diff ~ .),
+         # get the actuals for train and validate data sets
+         y_train = map(data_train, pull, var = "goal_diff"),
+         y_valid = map(data_valid, pull, var = "goal_diff"),
+         # make predictions on each data set
+         y_hat_train = map2(model, data_train, predict) %>% 
+           map(~ .$predictions),
+         y_hat_valid = map2(model, data_valid, predict) %>% 
+           map(~ .$predictions)) %>% 
+  select(k, y_train, y_valid, y_hat_train, y_hat_valid)
+
+cross_val_preds
+```
+
+# evalue our predictions
+```{r}
+cross_val_results <- cross_val_preds %>% 
+  mutate(rmse_train = map2_dbl(y_hat_train, y_train, 
+                               ~ sqrt(mean((..1 - ..2)^2))),
+         rmse_valid = map2_dbl(y_hat_valid, y_valid, 
+                               ~ sqrt(mean((..1 - ..2)^2)))) %>% 
+  select(k, starts_with("rmse"))
+
+p <- cross_val_results %>% 
+  gather(Dataset, RMSE, starts_with("rmse")) %>% 
+  ggplot(aes(y = RMSE, x = Dataset, fill = Dataset)) +
+  stat_boxplot() +
+  theme_minimal()
+
+p
+```
+
+### Seeing some massive overfitting with the default RF hyperparams
+Let's play with it and get to a good spot :)
+
+Usually I'd use a library to do this, but I'll just play with it by hand for
+this, which is typically frowned upon. See hyperopt package for the state of
+the art on this.
+
+```{r}
+cross_val_results <- cross_val_data %>% 
+  mutate(model = map(data_train, ranger, 
+                     formula = goal_diff ~
+                       won + 
+                       win_pct + 
+                       points_gp + 
+                       points + 
+                       lost + 
+                       gpg + 
+                       goals + 
+                       gaa + 
+                       assists + 
+                       ga,
+                     max.depth = 2, mtry = 2, replace = F,
+                     num.trees = 2000),
+         # get the actuals for train and validate data sets
+         y_train = map(data_train, pull, var = "goal_diff"),
+         y_valid = map(data_valid, pull, var = "goal_diff"),
+         # make predictions on each data set
+         y_hat_train = map2(model, data_train, predict) %>% 
+           map(~ .$predictions),
+         y_hat_valid = map2(model, data_valid, predict) %>% 
+           map(~ .$predictions)) %>% 
+  select(k, y_train, y_valid, y_hat_train, y_hat_valid) %>% 
+  # mutate(rmse_train = map2_dbl(y_hat_train, y_train, 
+  #                              ~ sqrt(mean((..1 - ..2)^2))),
+  #        rmse_valid = map2_dbl(y_hat_valid, y_valid, 
+  #                              ~ sqrt(mean((..1 - ..2)^2)))) %>% 
+  mutate(r2_train = map2_dbl(y_hat_train, y_train, 
+                               ~ cov(..1, ..2)/sd(..1)/sd(..2)),
+         r2_valid = map2_dbl(y_hat_valid, y_valid, 
+                               ~ cov(..1, ..2)/sd(..1)/sd(..2))) %>% 
+  select(k, starts_with("r2"))
+
+# p <- cross_val_results %>% 
+#   gather(Dataset, RMSE, starts_with("rmse")) %>% 
+#   ggplot(aes(y = RMSE, x = Dataset, fill = Dataset)) +
+#   stat_boxplot() +
+#   theme_minimal()
+
+p <- cross_val_results %>% 
+  gather(Dataset, R2, starts_with("r2")) %>% 
+  ggplot(aes(y = R2, x = Dataset, fill = Dataset)) +
+  stat_boxplot() +
+  theme_minimal()
+
+p
 ```
