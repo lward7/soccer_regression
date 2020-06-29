@@ -1,0 +1,292 @@
+---
+title: "Dan's Feature Engineering"
+output: html_notebook
+---
+
+Let's use a tree-based algo to extract important features, this is fun because
+it can handle interactions implicitly
+
+We'll use Random Forest, of which I prefer the `ranger` library.
+
+```{r}
+# install.packages("ranger")
+library(tidyverse)
+library(ranger)
+```
+
+Let's start off by reading in the data and doing some housekeeping
+```{r}
+base_data <- read_csv(
+  "womens_ncaa_soccer_20182019.csv",
+  col_types = cols(
+    .default = col_double(),
+    team = col_factor(),
+    season = col_factor()
+  )) %>% 
+  mutate(goal_diff = goals - ga) %>% 
+  select(-X, -X1) %>% 
+  # use variables lucy selected, except corners which is NA in 2018
+  select(# team, # not numeric, would cause overfitting anyway
+         team_games,
+         # corners_gp, 
+         assists_gp,
+         fouls_gp,
+         pk_pct,
+         points_gp,
+         save_pct,
+         saves_gp,
+         gpg,
+         sog_pct,
+         # win_pct, # seems weird to use this feature
+         sog_gp,
+         goal_diff,
+         season) %>% 
+  na.omit()
+```
+
+# View feature importance
+Note, since random forest is a tree-based model it does not require feature 
+scaling/normalization. If we were creating a final model, it would be good to 
+tune the hyperparameters, but for feature importance let's not...for now
+
+You can read about these metrics here:
+
+https://medium.com/the-artificial-impostor/feature-importance-measures-for-tree-models-part-i-47f187c1a2c3
+```{r}
+
+# to get importances you have to run the modle with importance specified
+get_importance <- function(metric) {
+  ranger(goal_diff ~ ., data = base_data, 
+                   importance = metric) %>% 
+  importance
+}
+
+# list all of the metrics to get importances of
+impurity_metrics <- c('impurity', 'impurity_corrected', 'permutation') 
+
+# wrangle the results together
+importances <- impurity_metrics %>% 
+  map(get_importance) %>% 
+  set_names(impurity_metrics) %>% 
+  bind_rows(.id = "Impurity Metric") 
+
+# plot it 
+importances %>% 
+  # put in long format
+  gather("Predictor", "Importance", -`Impurity Metric`) %>% 
+  # plot!
+  ggplot(aes(y = Predictor, x = Importance, fill = `Impurity Metric`)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  facet_grid(~`Impurity Metric`, scales = "free")
+  
+```
+
+Some of the predictors are coming out clearly
+
+### Simple model
+Just for fun, let's fit a RF model using the predictors that came out
+important here.
+
+```{r}
+features <- c("goal_diff", "team_games", "sog_gp", "saves_gp", "save_pct",
+              "points_gp", "gpg", "assists_gp")
+
+proc_data <- base_data %>% 
+  select(features) %>% 
+  mutate(index = row_number())
+
+
+# split into train/test
+
+# Have to do it myself :p
+
+# create a uniform distribution betwee 0 and 1, length is the size of the data,
+# then if it is below a given threshold make it train or test
+test_frac = 0.2
+split_index <- ifelse(runif(nrow(proc_data)) > test_frac, "train", "test")
+
+# split it on this
+proc_data_split <- proc_data %>% 
+  split(split_index)
+
+data_train <- proc_data_split$train
+data_test <- proc_data_split$test
+
+```
+
+### do k-fold cross-validation on this data
+We're going to use some advanced `tidyverse` code to keep it very organized
+```{r}
+# set the k
+k <- 20
+
+# make the above splitting code a function so we can use it MANY times 
+split_train_valid <- function(.df, .frac) {
+  split_index <- ifelse(runif(nrow(.df)) > .frac, "train", "valid")
+  .df %>% 
+    split(split_index)
+  }
+
+# now we use functions from Hadley's purrr package to apply this function
+# to the data k times generating unique train/validate sets
+cross_val_data <- crossing(data = list(data_train), k = 1:k) %>% 
+  mutate(data_split = map(data, split_train_valid, .2),
+         data_train = map(data_split, ~ .$train),
+         data_valid = map(data_split, ~ .$valid)) %>% 
+  select(k, data_train, data_valid)
+  
+cross_val_data
+
+```
+
+### fit the model k times, make predictions
+```{r}
+# fit the model for every row, then turn around and make predictions
+cross_val_preds <- cross_val_data %>% 
+  mutate(model = map(data_train, ranger, formula = goal_diff ~ .),
+         # get the actuals for train and validate data sets
+         y_train = map(data_train, pull, var = "goal_diff"),
+         y_valid = map(data_valid, pull, var = "goal_diff"),
+         # make predictions on each data set
+         y_hat_train = map2(model, data_train, predict) %>% 
+           map(~ .$predictions),
+         y_hat_valid = map2(model, data_valid, predict) %>% 
+           map(~ .$predictions)) %>% 
+  select(k, y_train, y_valid, y_hat_train, y_hat_valid)
+
+cross_val_preds
+```
+
+# evalue our predictions
+```{r}
+cross_val_results <- cross_val_preds %>% 
+  mutate(rmse_train = map2_dbl(y_hat_train, y_train, 
+                               ~ sqrt(mean((..1 - ..2)^2))),
+         rmse_valid = map2_dbl(y_hat_valid, y_valid, 
+                               ~ sqrt(mean((..1 - ..2)^2)))) %>% 
+  select(k, starts_with("rmse"))
+
+p <- cross_val_results %>% 
+  gather(Dataset, RMSE, starts_with("rmse")) %>% 
+  ggplot(aes(y = RMSE, x = Dataset, fill = Dataset)) +
+  stat_boxplot() +
+  theme_minimal()
+
+p
+```
+
+### Seeing some massive overfitting with the default RF hyperparams
+Let's play with it and get to a good spot :)
+
+Usually I'd use a library to do this, but I'll just play with it by hand for
+this, which is typically frowned upon. See hyperopt package for the state of
+the art on this.
+
+```{r}
+cross_val_results <- cross_val_data %>% 
+  mutate(model = map(data_train, ranger, 
+                     formula = goal_diff ~ ,
+                     max.depth = 3, mtry = 2, replace = F,
+                     num.trees = 2000),
+         # get the actuals for train and validate data sets
+         y_train = map(data_train, pull, var = "goal_diff"),
+         y_valid = map(data_valid, pull, var = "goal_diff"),
+         # make predictions on each data set
+         y_hat_train = map2(model, data_train, predict) %>% 
+           map(~ .$predictions),
+         y_hat_valid = map2(model, data_valid, predict) %>% 
+           map(~ .$predictions)) %>% 
+  select(k, y_train, y_valid, y_hat_train, y_hat_valid) %>% 
+  # mutate(rmse_train = map2_dbl(y_hat_train, y_train, 
+  #                              ~ sqrt(mean((..1 - ..2)^2))),
+  #        rmse_valid = map2_dbl(y_hat_valid, y_valid, 
+  #                              ~ sqrt(mean((..1 - ..2)^2)))) %>% 
+  mutate(r2_train = map2_dbl(y_hat_train, y_train, 
+                               ~ cov(..1, ..2)/sd(..1)/sd(..2)),
+         r2_valid = map2_dbl(y_hat_valid, y_valid, 
+                               ~ cov(..1, ..2)/sd(..1)/sd(..2)),
+         delta = r2_train - r2_valid) %>% 
+  select(k, starts_with("r2"), delta)
+
+# p <- cross_val_results %>% 
+#   gather(Dataset, RMSE, starts_with("rmse")) %>% 
+#   ggplot(aes(y = RMSE, x = Dataset, fill = Dataset)) +
+#   stat_boxplot() +
+#   theme_minimal()
+
+print(mean(cross_val_results$delta))
+
+p <- cross_val_results %>% 
+  gather(Dataset, R2, starts_with("r2")) %>% 
+  ggplot(aes(y = R2, x = Dataset, fill = Dataset)) +
+  stat_boxplot() +
+  theme_minimal()
+
+p
+```
+
+This is not bad, using a depth of 3 we get a pretty good R2, let's see if we
+Can translate it to a linear model
+
+```{r}
+form <- goal_diff ~ saves_gp + save_pct + gpg
+
+cross_val_results_lm <- cross_val_data %>% 
+    mutate(model = map(data_train, lm, formula = form),
+           # get the actuals for train and validate data sets
+           y_train = map(data_train, pull, var = "goal_diff"),
+           y_valid = map(data_valid, pull, var = "goal_diff"),
+           # make predictions on each data set
+           y_hat_train = map2(model, data_train, predict),
+           y_hat_valid = map2(model, data_valid, predict)) %>% 
+  # mutate(rmse_train = map2_dbl(y_hat_train, y_train, 
+  #                              ~ sqrt(mean((..1 - ..2)^2))),
+  #        rmse_valid = map2_dbl(y_hat_valid, y_valid, 
+  #                              ~ sqrt(mean((..1 - ..2)^2)))) %>% 
+  mutate(r2_train = map2_dbl(y_hat_train, y_train, 
+                             ~ cov(..1, ..2)/sd(..1)/sd(..2)),
+         r2_valid = map2_dbl(y_hat_valid, y_valid, 
+                             ~ cov(..1, ..2)/sd(..1)/sd(..2)),
+         delta = r2_train - r2_valid) %>% 
+  select(k, starts_with("r2"), delta, model)
+
+p <- cross_val_results_lm %>% 
+  gather(Dataset, R2, starts_with("r2")) %>% 
+  ggplot(aes(y = R2, x = Dataset, fill = Dataset)) +
+  stat_boxplot() +
+  theme_minimal()
+
+p
+
+```
+
+Not sure why this is so high? Let's validate from the models
+```{r}
+cross_val_results_lm$model %>% 
+  map(summary) %>% 
+  map(~ list(adj_r_sq = .$adj.r.squared, r_sq = .$r.squared)) %>% 
+  transpose %>% 
+  map(as.numeric) %>% 
+  map(mean)
+```
+
+Check coefs
+```{r}
+coefs <- cross_val_results_lm$model %>% 
+  map(~ .$coefficients) %>% 
+  bind_rows(.id = "k") %>% 
+  gather(feature, coef_value, -k)
+
+coefs %>% 
+  ggplot(aes(y = coef_value, x = feature, fill = feature)) +
+  geom_boxplot() +
+  theme_minimal()
+```
+
+### Fit a final model on test data
+```{r}
+model_test <- lm(goal_diff ~ saves_gp + save_pct + gpg, data_test)
+summary(model_test)
+```
+
+# got R2 and adj R2 of 0.97
