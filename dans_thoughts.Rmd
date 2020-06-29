@@ -25,6 +25,22 @@ base_data <- read_csv(
   )) %>% 
   mutate(goal_diff = goals - ga) %>% 
   select(-X, -X1) %>% 
+  # use variables lucy selected, except corners which is NA in 2018
+  select(# team, # not numeric, would cause overfitting anyway
+         team_games,
+         # corners_gp, 
+         assists_gp,
+         fouls_gp,
+         pk_pct,
+         points_gp,
+         save_pct,
+         saves_gp,
+         gpg,
+         sog_pct,
+         # win_pct, # seems weird to use this feature
+         sog_gp,
+         goal_diff,
+         season) %>% 
   na.omit()
 ```
 
@@ -72,8 +88,8 @@ Just for fun, let's fit a RF model using the predictors that came out
 important here.
 
 ```{r}
-features <- c("goal_diff", "won", "win_pct", "points_gp", "points", "lost", 
-              "gpg", "goals", "gaa", "assists", "ga")
+features <- c("goal_diff", "team_games", "sog_gp", "saves_gp", "save_pct",
+              "points_gp", "gpg", "assists_gp")
 
 proc_data <- base_data %>% 
   select(features) %>% 
@@ -169,18 +185,8 @@ the art on this.
 ```{r}
 cross_val_results <- cross_val_data %>% 
   mutate(model = map(data_train, ranger, 
-                     formula = goal_diff ~
-                       won + 
-                       win_pct + 
-                       points_gp + 
-                       points + 
-                       lost + 
-                       gpg + 
-                       goals + 
-                       gaa + 
-                       assists + 
-                       ga,
-                     max.depth = 2, mtry = 2, replace = F,
+                     formula = goal_diff ~ ,
+                     max.depth = 3, mtry = 2, replace = F,
                      num.trees = 2000),
          # get the actuals for train and validate data sets
          y_train = map(data_train, pull, var = "goal_diff"),
@@ -198,14 +204,17 @@ cross_val_results <- cross_val_data %>%
   mutate(r2_train = map2_dbl(y_hat_train, y_train, 
                                ~ cov(..1, ..2)/sd(..1)/sd(..2)),
          r2_valid = map2_dbl(y_hat_valid, y_valid, 
-                               ~ cov(..1, ..2)/sd(..1)/sd(..2))) %>% 
-  select(k, starts_with("r2"))
+                               ~ cov(..1, ..2)/sd(..1)/sd(..2)),
+         delta = r2_train - r2_valid) %>% 
+  select(k, starts_with("r2"), delta)
 
 # p <- cross_val_results %>% 
 #   gather(Dataset, RMSE, starts_with("rmse")) %>% 
 #   ggplot(aes(y = RMSE, x = Dataset, fill = Dataset)) +
 #   stat_boxplot() +
 #   theme_minimal()
+
+print(mean(cross_val_results$delta))
 
 p <- cross_val_results %>% 
   gather(Dataset, R2, starts_with("r2")) %>% 
@@ -215,3 +224,69 @@ p <- cross_val_results %>%
 
 p
 ```
+
+This is not bad, using a depth of 3 we get a pretty good R2, let's see if we
+Can translate it to a linear model
+
+```{r}
+form <- goal_diff ~ saves_gp + save_pct + gpg
+
+cross_val_results_lm <- cross_val_data %>% 
+    mutate(model = map(data_train, lm, formula = form),
+           # get the actuals for train and validate data sets
+           y_train = map(data_train, pull, var = "goal_diff"),
+           y_valid = map(data_valid, pull, var = "goal_diff"),
+           # make predictions on each data set
+           y_hat_train = map2(model, data_train, predict),
+           y_hat_valid = map2(model, data_valid, predict)) %>% 
+  # mutate(rmse_train = map2_dbl(y_hat_train, y_train, 
+  #                              ~ sqrt(mean((..1 - ..2)^2))),
+  #        rmse_valid = map2_dbl(y_hat_valid, y_valid, 
+  #                              ~ sqrt(mean((..1 - ..2)^2)))) %>% 
+  mutate(r2_train = map2_dbl(y_hat_train, y_train, 
+                             ~ cov(..1, ..2)/sd(..1)/sd(..2)),
+         r2_valid = map2_dbl(y_hat_valid, y_valid, 
+                             ~ cov(..1, ..2)/sd(..1)/sd(..2)),
+         delta = r2_train - r2_valid) %>% 
+  select(k, starts_with("r2"), delta, model)
+
+p <- cross_val_results_lm %>% 
+  gather(Dataset, R2, starts_with("r2")) %>% 
+  ggplot(aes(y = R2, x = Dataset, fill = Dataset)) +
+  stat_boxplot() +
+  theme_minimal()
+
+p
+
+```
+
+Not sure why this is so high? Let's validate from the models
+```{r}
+cross_val_results_lm$model %>% 
+  map(summary) %>% 
+  map(~ list(adj_r_sq = .$adj.r.squared, r_sq = .$r.squared)) %>% 
+  transpose %>% 
+  map(as.numeric) %>% 
+  map(mean)
+```
+
+Check coefs
+```{r}
+coefs <- cross_val_results_lm$model %>% 
+  map(~ .$coefficients) %>% 
+  bind_rows(.id = "k") %>% 
+  gather(feature, coef_value, -k)
+
+coefs %>% 
+  ggplot(aes(y = coef_value, x = feature, fill = feature)) +
+  geom_boxplot() +
+  theme_minimal()
+```
+
+### Fit a final model on test data
+```{r}
+model_test <- lm(goal_diff ~ saves_gp + save_pct + gpg, data_test)
+summary(model_test)
+```
+
+# got R2 and adj R2 of 0.97
