@@ -13,6 +13,8 @@ I started by narrowing down the dataset to quantitative, per-game variables to p
 ```{r}
 library(tidyverse)
 
+womens_ncaa_soccer_20182019 <- read.csv("womens_ncaa_soccer_20182019.csv")
+
 soccer_qunant <- womens_ncaa_soccer_20182019 %>% 
     mutate(goal_diff = goals - ga) %>% 
   select(team,
