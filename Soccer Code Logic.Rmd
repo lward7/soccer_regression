@@ -683,7 +683,8 @@ soccer_correlation <-
   womens_ncaa_soccer_20182019 %>% 
   na.omit() %>% 
   select(!"X") %>% 
-  select(!"X1") %>% 
+  select(!"X.1") %>% 
+  select(-season) %>% 
   select(!"save_pct100") %>% 
   select(!"goal_ratio") %>% 
   select_if(is.numeric) %>%
