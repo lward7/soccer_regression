@@ -37,9 +37,9 @@ soccer_qunant <- womens_ncaa_soccer_20182019 %>%
 Constructing a correlation matrix of relevant per-game variables to determine the strength of relationships between the variables in the dataset.
 ```{r}
 
-install.packages("gt")
+# install.packages("gt")
 library(gt)
-install.packages("xtable")
+# install.packages("xtable")
 library(xtable)
 
 corr_table <- soccer_qunant %>%
@@ -78,7 +78,7 @@ womens_ncaa_soccer_20182019 <-
   womens_ncaa_soccer_20182019 %>% 
   mutate(goal_diff = goals - ga)
 
-install.packages("ggpubr")
+# install.packages("ggpubr")
 library(ggpubr)
 
 womens_ncaa_soccer_20182019 %>% 
@@ -572,7 +572,7 @@ summary(final_model2019)
 final_model <- lm(goal_diff~ pk_pct100 + save_pct100 + saves_gp + fouls_gp +
                     sog_gp, data = womens_ncaa_soccer_20182019)
 summary(final_model)
-install.packages("GGally")
+# install.packages("GGally")
 library(GGally)
 
 ggcoef(final_model2019,
