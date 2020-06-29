@@ -1,0 +1,94 @@
+---
+title: "Dan's Feature Engineering"
+output: html_notebook
+---
+
+Let's use a tree-based algo to extract important features, this is fun because
+it can handle interactions implicitly
+
+We'll use Random Forest, of which I prefer the `ranger` library.
+
+```{r}
+# install.packages("ranger")
+library(tidyverse)
+library(ranger)
+```
+
+Let's start off by reading in the data and doing some housekeeping
+```{r}
+base_data <- read_csv(
+  "womens_ncaa_soccer_20182019.csv",
+  col_types = cols(
+    .default = col_double(),
+    team = col_factor(),
+    season = col_factor()
+  )) %>% 
+  mutate(goal_diff = goals - ga) %>% 
+  select(-X, -X1) %>% 
+  na.omit()
+```
+
+# View feature importance
+Note, since random forest is a tree-based model it does not require feature 
+scaling/normalization. If we were creating a final model, it would be good to 
+tune the hyperparameters, but for feature importance let's not...for now
+
+You can read about these metrics here:
+
+https://medium.com/the-artificial-impostor/feature-importance-measures-for-tree-models-part-i-47f187c1a2c3
+```{r}
+
+# to get importances you have to run the modle with importance specified
+get_importance <- function(metric) {
+  ranger(goal_diff ~ ., data = base_data, 
+                   importance = metric) %>% 
+  importance
+}
+
+# list all of the metrics to get importances of
+impurity_metrics <- c('impurity', 'impurity_corrected', 'permutation') 
+
+# wrangle the results together
+importances <- impurity_metrics %>% 
+  map(get_importance) %>% 
+  set_names(impurity_metrics) %>% 
+  bind_rows(.id = "Impurity Metric") 
+
+# plot it 
+importances %>% 
+  # put in long format
+  gather("Predictor", "Importance", -`Impurity Metric`) %>% 
+  # plot!
+  ggplot(aes(y = Predictor, x = Importance, fill = `Impurity Metric`)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  facet_grid(~`Impurity Metric`, scales = "free")
+  
+```
+
+Some of the predictors are coming out clearly
+
+### Simple model
+Just for fun, let's fit a RF model using the predictors that came out
+important here.
+
+```{r}
+features <- c("goal_diff", "won", "win_pct", "points_gp", "points", "lost", 
+              "gpg", "goals", "gaa", "assists", "ga")
+
+proc_data <- base_data %>% 
+  select(features) %>% 
+  mutate(index = row_number())
+
+# remove a portion as a test set
+proc_data_test <- proc_data %>% 
+  sample_frac(.2)
+
+proc_data_train <- proc_data %>% 
+  filter(!(index %in% proc_data_test$index))
+
+```
+
+### do k-fold cross-validation manually
+```{r}
+fit_model
+```
