@@ -150,6 +150,23 @@ womens_ncaa_soccer_20182019 %>%
 ```
 It looks like points per game, shots per game, and assists per game have a pretty strong linear relationship with win percent. Saves per game has a moderate linear relationship with win percent. Fouls per game does not appear to have any sort of relevant relationship with win percent. Assists per game and points per game are clearly very strongly correlated. Corners per game and assists per game seem to have a weak relationship.
 
+DZ: A more consice way to do this is to use `facet_wrap`:
+
+```{r}
+womens_ncaa_soccer_20182019 %>% 
+  select(goal_diff, saves_gp, fouls_gp, corners_gp, pk_pct, save_pct) %>% 
+  gather("predictor", "value", -goal_diff) %>% 
+  ggplot(aes(x  = value,
+             y = goal_diff)) +
+  geom_point() +
+  theme_bw() +
+  facet_wrap(~predictor, scales = "free") +
+  labs(title = "Goal Differential and Saves Per Game",
+       subtitle = "Women's NCAA Soccer 2018 & 2019",
+       x = "Saves Per Game",
+       y = "Season Goal Differential") +
+  stat_cor(method = "pearson")
+```
 
 Exploring the effect of season
 ```{r}
